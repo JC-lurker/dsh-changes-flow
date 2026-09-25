@@ -16,7 +16,7 @@ import { createPortal } from 'react-dom'
 import type { Context } from 'cordis'
 
 export const name = 'dsh-changes-flow'
-export const inject = ['slots', 'locale']
+export const inject = ['slots', 'locale', 'conversation']
 
 interface PrRecord {
   url: string
@@ -230,8 +230,11 @@ function ComposerAnchor({ ctx }: { ctx: any }) {
 
 async function sendToAssistant(ctx: any, sessionId: string, prompt: string): Promise<void> {
   const actx = ctx.sessions?.scope?.(sessionId)
-  if (!actx?.conversation?.send) throw new Error('The session assistant is unavailable')
-  await actx.conversation.send(prompt)
+  // The Agent scope does not inherit this plugin's inject list. Context.get
+  // resolves the service and binds its send method to this session scope.
+  const conversation = actx?.get?.('conversation')
+  if (!conversation?.send) throw new Error('The session assistant is unavailable')
+  await conversation.send(prompt)
 }
 
 function formatDateTag(): string {
