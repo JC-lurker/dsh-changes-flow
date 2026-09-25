@@ -1,6 +1,6 @@
 {
   "name": "dsh-changes-flow",
-  "version": "0.1.0",
+  "version": "0.0.2",
   "type": "module",
   "description": "Adds Codex-style Git actions to the Changes tab and a branch/worktree switcher to the new-session composer. Create branches and worktrees, commit changes, and prepare or merge pull requests from DSH.",
   "main": "lib/index.js",
