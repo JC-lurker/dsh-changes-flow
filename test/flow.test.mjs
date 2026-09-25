@@ -33,9 +33,12 @@ test('flow routes keep merges within recorded session PRs and preserve dirty wor
     let handler
     const llmCalls = []
     let finishReason
+    let modelSelection = { pending: { provider: 'selected', model: 'session-model', reasoningEffort: 'high' }, lastUsed: { provider: 'old', model: 'previous-model' } }
     apply({
       webServer: { register(route) { handler = route.handler; return () => {} } },
       sessions: { get(id) { return id === 'test-session' ? { header: { cwd }, requestHeader: () => ({ config: { provider: 'test', model: 'commit-title' } }) } : undefined } },
+      sessionProjections: { stateOf(_session, key) { assert.equal(key, 'modelSelection'); return modelSelection } },
+      agentDefaultModel: { currentSelection() { return { provider: 'default', model: 'default-model' } } },
       webRuntime: { trustedHosts: [] },
       llm: { async *stream(options) {
         llmCalls.push(options)
@@ -102,10 +105,19 @@ test('flow routes keep merges within recorded session PRs and preserve dirty wor
     await writeFile(join(created.value.path, 'linked-dirty.txt'), 'linked work\n')
     const suggested = await post('commit-message', { worktree: created.value.path })
     assert.equal(suggested.value.message, 'feat: describe linked work')
-    assert.equal(llmCalls[0].provider, 'test')
+    assert.equal(llmCalls[0].provider, 'selected')
+    assert.equal(llmCalls[0].model, 'session-model')
+    assert.equal(llmCalls[0].reasoningEffort, 'high')
+    assert.equal(llmCalls[0].maxTokens, 4096)
     const modelInput = JSON.parse(llmCalls[0].messages[0].content[0].text)
     assert.match(modelInput.status, /linked-dirty\.txt/)
     assert.doesNotMatch(modelInput.status, /(?:^|\n)\?\? dirty\.txt/)
+    modelSelection = { pending: null, lastUsed: { provider: 'used', model: 'last-used-model' } }
+    await post('commit-message', { worktree: created.value.path })
+    assert.equal(llmCalls[1].model, 'last-used-model')
+    modelSelection = { pending: null, lastUsed: null }
+    await post('commit-message', { worktree: created.value.path })
+    assert.equal(llmCalls[2].model, 'default-model')
     finishReason = { kind: 'error', failure: { message: 'model unavailable' } }
     const failedSuggestion = await post('commit-message', { worktree: created.value.path })
     assert.equal(failedSuggestion.ok, false)
