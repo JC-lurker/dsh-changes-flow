@@ -10,6 +10,14 @@ A DSH plugin that adds Git actions to the `dsh-better-sidebar` Changes tab and a
 
 The worktree checkbox creates a new linked worktree on a `flow/<base>-<id>` branch when checked from the main checkout. It shows **Creating worktree…** and **Opening worktree…** while those steps run. From a linked worktree, unchecking it opens the main workspace without deleting the linked worktree. Branches without an existing worktree do not appear in the switcher.
 
+### Worktree switcher
+
+![New-session composer with the worktree switcher open](docs/images/worktree-switcher.png)
+
+### Changes tab actions
+
+![Changes tab with the Git action menu open](docs/images/changes-actions.png)
+
 ## Requirements
 
 - DSH with `dsh-better-sidebar` 0.21.1 or a newer compatible version
