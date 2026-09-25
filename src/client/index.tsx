@@ -318,7 +318,8 @@ const GHOST_BTN: React.CSSProperties = {
   cursor: 'pointer',
 }
 
-function FlowBar({ ctx, scope, visible, worktree }: { ctx: any; scope: { sessionId: string; cwd?: string }; visible: boolean; worktree?: string }) {
+function FlowBar({ ctx, scope, visible, changesRef }: { ctx: any; scope: { sessionId: string; cwd?: string }; visible: boolean; changesRef: React.RefObject<HTMLDivElement | null> }) {
+  const [worktree, setWorktree] = useState<string | undefined>()
   const [action, setAction] = useState<FlowAction | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -341,6 +342,27 @@ function FlowBar({ ctx, scope, visible, worktree }: { ctx: any; scope: { session
   const prMenuRef = useRef<HTMLDivElement>(null)
   const [squashMerge, setSquashMerge] = useState(true)
   const refreshGeneration = useRef(0)
+
+  useEffect(() => {
+    const changes = changesRef.current
+    if (!changes) return
+    const syncWorktree = () => {
+      const select = changes.querySelector<HTMLSelectElement>('[class*="gitWorktreeRow"] select')
+      const selected = select?.value || undefined
+      setWorktree(previous => previous === selected ? previous : selected)
+    }
+    const observer = new MutationObserver(syncWorktree)
+    observer.observe(changes, { subtree: true, childList: true, attributes: true, attributeFilter: ['value', 'selected', 'title'] })
+    const afterChange = () => { window.setTimeout(syncWorktree, 0) }
+    changes.addEventListener('change', afterChange)
+    const timer = window.setInterval(syncWorktree, 2_000)
+    syncWorktree()
+    return () => {
+      observer.disconnect()
+      changes.removeEventListener('change', afterChange)
+      window.clearInterval(timer)
+    }
+  }, [changesRef, scope?.sessionId, scope?.cwd])
 
   const refreshGit = useCallback(async () => {
     if (!scope?.sessionId) return
@@ -638,31 +660,11 @@ function FlowBar({ ctx, scope, visible, worktree }: { ctx: any; scope: { session
 /** Wrap the git descriptor's component once; returns a restore fn. */
 function WrappedGitTab({ Orig, props }: { Orig: any; props: any }) {
   const prefs = usePluginPreferences()
-  const rootRef = useRef<HTMLDivElement>(null)
-  const [worktree, setWorktree] = useState<string | undefined>()
-  useEffect(() => {
-    if (!prefs.changesTab || !rootRef.current) return
-    const root = rootRef.current
-    const syncWorktree = () => {
-      const select = root.querySelector<HTMLSelectElement>('[class*="gitWorktreeRow"] select')
-      const selected = select?.value || undefined
-      setWorktree(previous => previous === selected ? previous : selected)
-    }
-    const observer = new MutationObserver(syncWorktree)
-    observer.observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ['value', 'selected', 'title'] })
-    root.addEventListener('change', syncWorktree, true)
-    const timer = window.setInterval(syncWorktree, 2_000)
-    syncWorktree()
-    return () => {
-      observer.disconnect()
-      root.removeEventListener('change', syncWorktree, true)
-      window.clearInterval(timer)
-    }
-  }, [prefs.changesTab, props.scope?.sessionId, props.scope?.cwd])
+  const changesRef = useRef<HTMLDivElement>(null)
   if (!prefs.changesTab) return <Orig {...props} />
-  return <div ref={rootRef} style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
-    <FlowBar ctx={props.ctx} scope={props.scope} visible={props.visible} worktree={worktree} />
-    <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}><Orig {...props} /></div>
+  return <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+    <FlowBar ctx={props.ctx} scope={props.scope} visible={props.visible} changesRef={changesRef} />
+    <div ref={changesRef} style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}><Orig {...props} /></div>
   </div>
 }
 
