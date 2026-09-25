@@ -31,10 +31,16 @@ test('flow routes keep merges within recorded session PRs and preserve dirty wor
     git(cwd, 'checkout', 'main')
 
     let handler
+    const llmCalls = []
     apply({
       webServer: { register(route) { handler = route.handler; return () => {} } },
-      sessions: { get(id) { return id === 'test-session' ? { header: { cwd } } : undefined } },
+      sessions: { get(id) { return id === 'test-session' ? { header: { cwd }, requestHeader: () => ({ config: { provider: 'test', model: 'commit-title' } }) } : undefined } },
       webRuntime: { trustedHosts: [] },
+      llm: { async *stream(options) {
+        llmCalls.push(options)
+        yield { type: 'text-delta', index: 0, text: 'feat: describe linked work' }
+        yield { type: 'finish', reason: { kind: 'stop' } }
+      } },
       effect(fn) { fn() },
     }, { changesTab: false, composerSwitcher: true })
     async function post(op, payload) {
@@ -93,6 +99,12 @@ test('flow routes keep merges within recorded session PRs and preserve dirty wor
     assert.equal(git(cwd, 'branch', '--show-current'), 'flow/test')
 
     await writeFile(join(created.value.path, 'linked-dirty.txt'), 'linked work\n')
+    const suggested = await post('commit-message', { worktree: created.value.path })
+    assert.equal(suggested.value.message, 'feat: describe linked work')
+    assert.equal(llmCalls[0].provider, 'test')
+    const modelInput = JSON.parse(llmCalls[0].messages[0].content[0].text)
+    assert.match(modelInput.status, /linked-dirty\.txt/)
+    assert.doesNotMatch(modelInput.status, /(?:^|\n)\?\? dirty\.txt/)
     const selectedBranch = await post('flow-branch', { name: 'flow/selected-worktree', worktree: created.value.path })
     assert.equal(selectedBranch.ok, true)
     assert.equal(git(created.value.path, 'branch', '--show-current'), 'flow/selected-worktree')

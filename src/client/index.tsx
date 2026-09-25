@@ -228,37 +228,10 @@ function ComposerAnchor({ ctx }: { ctx: any }) {
     : <div title="Select a workspace containing a Git repository" style={{ marginLeft: 8, padding: '4px 7px', borderRadius: 7, background: '#303030', color: '#888', fontSize: 12 }}>Select Git workspace</div>, target)}</>
 }
 
-function appendToDraft(ctx: any, sessionId: string, text: string): boolean {
-  try {
-    const actx = ctx.sessions?.scope ? ctx.sessions.scope(sessionId) : undefined
-    const conversation = typeof ctx.get === 'function' ? ctx.get('conversation') : ctx.conversation
-    if (conversation?.input && actx) {
-      const input = conversation.input.for(actx)
-      if (input?.setDraft) {
-        const cur = input.state?.getSnapshot?.()?.draft ?? ''
-        const next = cur.trim() === '' ? text : `${cur}\n\n${text}`
-        input.setDraft(next)
-        return true
-      }
-    }
-  } catch (e) {
-    console.warn('[dsh-changes-flow] conversation input failed:', e)
-  }
-  // DOM fallback: direct textarea insert
-  try {
-    const ta = document.querySelector<HTMLTextAreaElement>('#root textarea[data-phase], #root textarea')
-    if (ta) {
-      const cur = ta.value
-      const next = cur.trim() === '' ? text : `${cur}\n\n${text}`
-      ta.value = next
-      ta.dispatchEvent(new Event('input', { bubbles: true }))
-      ta.focus()
-      return true
-    }
-  } catch (e) {
-    console.warn('[dsh-changes-flow] DOM fallback failed:', e)
-  }
-  return false
+async function sendToAssistant(ctx: any, sessionId: string, prompt: string): Promise<void> {
+  const actx = ctx.sessions?.scope?.(sessionId)
+  if (!actx?.conversation?.send) throw new Error('The session assistant is unavailable')
+  await actx.conversation.send(prompt)
 }
 
 function formatDateTag(): string {
@@ -473,28 +446,36 @@ function FlowBar({ ctx, scope, visible, changesRef }: { ctx: any; scope: { sessi
     }
   }
 
-  const handleRebasePrompt = () => {
-    const target = rebaseTarget.trim() || 'main'
-    const ok = appendToDraft(
-      ctx,
-      scope.sessionId,
-      `In the Git worktree at ${JSON.stringify(worktree || scope.cwd)}, please rebase the current branch onto "${target}". Carefully resolve any conflicts, keep our local changes, and run checks to verify everything works.`,
-    )
-    say(ok ? 'ok' : 'err', ok ? 'Rebase instruction inserted into composer draft.' : 'Failed to insert draft.')
+  const runAssistantAction = async (prompt: string, label: string) => {
+    if (loading) return
+    setLoading(true)
+    setFeedback(null)
+    try {
+      await sendToAssistant(ctx, scope.sessionId, prompt)
+      say('ok', `${label} sent to the assistant.`)
+    } catch (e: any) { say('err', e.message || `Could not send ${label.toLowerCase()}`) }
+    finally { setLoading(false) }
   }
 
-  const handleCommitPrompt = () => {
-    const ok = appendToDraft(
-      ctx,
-      scope.sessionId,
-      `Please review the unstaged and staged git changes in the worktree at ${JSON.stringify(worktree || scope.cwd)} and propose a concise Conventional Commit message (e.g. feat: ..., fix: ..., chore: ...).`,
-    )
-    say(ok ? 'ok' : 'err', ok ? 'Commit-message request inserted into composer draft.' : 'Failed to insert draft.')
+  const handleRebasePrompt = () => {
+    const target = rebaseTarget.trim() || 'main'
+    void runAssistantAction(`In the Git worktree at ${JSON.stringify(worktree || scope.cwd)}, please rebase the current branch onto "${target}". Carefully resolve any conflicts, keep our local changes, and run checks to verify everything works.`, 'Rebase request')
+  }
+
+  const handleCommitPrompt = async () => {
+    if (loading) return
+    setLoading(true)
+    setFeedback(null)
+    try {
+      const result = await apiPost<{ message: string }>('/changes-flow/api/commit-message', { sessionId: scope.sessionId, cwd: scope.cwd, worktree })
+      setCommitMsg(result.message)
+      say('ok', 'Commit message generated. Review it before committing.')
+    } catch (e: any) { say('err', e.message || 'Could not generate a commit message') }
+    finally { setLoading(false) }
   }
 
   const handlePushPrompt = () => {
-    const ok = appendToDraft(ctx, scope.sessionId, `In the Git worktree at ${JSON.stringify(worktree || scope.cwd)}, please push the current branch to its remote, setting the upstream if needed. Report the remote and branch you pushed.`)
-    say(ok ? 'ok' : 'err', ok ? 'Push instruction inserted into the composer.' : 'Failed to insert draft.')
+    void runAssistantAction(`In the Git worktree at ${JSON.stringify(worktree || scope.cwd)}, please push the current branch to its remote, setting the upstream if needed. Report the remote and branch you pushed.`, 'Push request')
   }
 
   const handleCommitAll = async () => {
@@ -520,12 +501,7 @@ function FlowBar({ ctx, scope, visible, changesRef }: { ctx: any; scope: { sessi
   }
 
   const handlePrPrompt = () => {
-    const ok = appendToDraft(
-      ctx,
-      scope.sessionId,
-      `In the Git worktree at ${JSON.stringify(worktree || scope.cwd)}, please inspect the commits and diff on the current branch against main, compose a clear PR title and description, and run \`gh pr create\` there.`,
-    )
-    say(ok ? 'ok' : 'err', ok ? 'PR prompt inserted into composer draft.' : 'Failed to insert draft.')
+    void runAssistantAction(`In the Git worktree at ${JSON.stringify(worktree || scope.cwd)}, please inspect the commits and diff on the current branch against main, compose a clear PR title and description, and run \`gh pr create\` there.`, 'PR request')
   }
 
   const handleSavePr = async () => {
@@ -618,17 +594,17 @@ function FlowBar({ ctx, scope, visible, changesRef }: { ctx: any; scope: { sessi
 
           {action === 'rebase' && <div style={{ display: 'grid', gap: 12 }}>
             <label style={{ display: 'grid', gap: 6 }}>Rebase from<input value={rebaseTarget} onChange={e => setRebaseTarget(e.target.value)} placeholder="main" style={INPUT} /></label>
-            <button type="button" onClick={handleRebasePrompt} style={PRIMARY_BTN}>Ask assistant to rebase</button>
+            <button type="button" onClick={handleRebasePrompt} disabled={loading} style={PRIMARY_BTN}>{loading ? 'Sending…' : 'Ask assistant to rebase'}</button>
           </div>}
 
           {action === 'commit' && <div style={{ display: 'grid', gap: 12 }}>
-            <div style={{ display: 'flex', gap: 8 }}><button type="button" onClick={handleCommitPrompt} style={GHOST_BTN}>Ask for a message</button><button type="button" onClick={handlePushPrompt} style={GHOST_BTN}>Ask to push</button></div>
+            <div style={{ display: 'flex', gap: 8 }}><button type="button" onClick={() => void handleCommitPrompt()} disabled={loading} style={GHOST_BTN}>{loading ? 'Working…' : 'Ask for a message'}</button><button type="button" onClick={handlePushPrompt} disabled={loading} style={GHOST_BTN}>Ask to push</button></div>
             <label style={{ display: 'grid', gap: 6 }}>Commit message<input value={commitMsg} onChange={e => setCommitMsg(e.target.value)} placeholder="feat: describe the change" style={INPUT} /></label>
             <button type="button" onClick={() => void handleCommitAll()} disabled={loading} style={PRIMARY_BTN}>{loading ? 'Working…' : 'Stage and commit'}</button>
           </div>}
 
           {action === 'pr' && <div style={{ display: 'grid', gap: 12 }}>
-            <button type="button" onClick={handlePrPrompt} style={PRIMARY_BTN}>Ask assistant to create PR</button>
+            <button type="button" onClick={handlePrPrompt} disabled={loading} style={PRIMARY_BTN}>{loading ? 'Sending…' : 'Ask assistant to create PR'}</button>
             <div style={{ borderTop: '1px solid #3c3c3c', margin: '2px 0' }} />
             <label style={{ display: 'grid', gap: 6 }}>Record a created PR<input value={prUrl} onChange={e => setPrUrl(e.target.value)} placeholder="https://github.com/owner/repo/pull/123" style={INPUT} /></label>
             <button type="button" onClick={() => void handleSavePr()} disabled={loading} style={GHOST_BTN}>Save PR to this session</button>

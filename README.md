@@ -4,7 +4,7 @@ A DSH plugin that adds Git actions to the `dsh-better-sidebar` Changes tab and a
 
 ## Features
 
-- **Changes tab:** show the selected worktree's branch and change count; stage and commit changes; create a branch; prepare a pull request; request a rebase; and merge a pull request recorded in the session. Actions that run Git use the worktree selected in the Changes tab.
+- **Changes tab:** show the selected worktree's branch and change count; stage and commit changes; create a branch; prepare a pull request; request a rebase; and merge a pull request recorded in the session. Actions that run Git use the worktree selected in the Changes tab. **Ask for a message** generates a commit title directly into the modal's input; rebase, push, and PR requests are sent to the assistant without changing the composer draft.
 - **New-session composer:** show the current branch, open an existing worktree by its branch and folder, or create a linked worktree. Opening an existing worktree only switches DSH workspaces; it does not run `git checkout` or create another worktree.
 - **Plugin settings:** turn the Changes tab actions and composer switcher on or off independently.
 
